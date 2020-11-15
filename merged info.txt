@@ -1,0 +1,3 @@
+band 1 density
+band 2 distance
+band 3 lithology

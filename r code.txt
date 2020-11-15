@@ -1,0 +1,71 @@
+library(raster)
+library(rgdal)
+library(sp)
+library(dplyr)
+library(DMwR)
+library(caret)
+library(snow)
+
+
+rasstack=stack("merged_raster_data.tif")
+point=readOGR("final_deposit_data_crop.shp")
+rasvalue=extract(rasstack,point)
+combined=cbind(point,rasvalue)
+head(combined)
+colnames(combined@data)[3] = "B1"
+colnames(combined@data)[4] = "B2"
+colnames(combined@data)[5] = "B3"
+
+combined@data %>%
+  group_by(class) %>%
+  summarise(
+          count = n()
+            )
+
+val=combined@data
+val <- na.omit(val)
+val$class = as.factor(val$class)
+newval <- SMOTE(class ~ ., val, k=3, perc.over = 1000,perc.under=100)
+newval[3]=round(newval[3])
+newval[4]=round(newval[4])
+newval[5]=round(newval[5])
+newval=newval[sample(nrow(newval)),]
+newval %>%
+  group_by(class) %>%
+  summarise(
+          count = n()
+            )
+dim(newval)
+N_FILES=3171
+SPLT=0.8 #80% train
+b = floor(SPLT*N_FILES)
+train = newval[1:b,]
+test = newval[(b+1):N_FILES,]
+modFit_rf <- caret::train(class ~ B1+B2+B3, method = "rf", data=train)
+
+validation_result<-predict(modFit_rf,newdata=test)
+result_comparison<-cbind(as.numeric(as.character(validation_result)),test[,2])
+preds<-result_comparison[,1]
+y<-result_comparison[,2]
+confmat <- confusionMatrix(as.factor(y),as.factor(preds))
+library(pROC)
+kurva_roc<-roc(preds, y, levels=c("1", "2"))
+
+img_subset <- brick("merged_raster_data.tif")
+names(img_subset) <- c(paste0("B", 1:3, coll = ""))
+
+#image prediction and write image
+beginCluster()
+preds_rf <- clusterR(img_subset, raster::predict, args = list(model = modFit_rf))
+endCluster()
+plot(preds_rf)
+writeRaster(preds_rf, "rf_result_ni_pred", format = "GTiff", overwrite=TRUE)
+gc()
+
+
+val_c1 <- val[val$class == 1, ]
+val_c2 <- val[val$class == 2, ]
+
+
+
+
